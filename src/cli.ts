@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { exec, execSync } from 'child_process'
 import { promisify } from 'util'
-import { pathToFileURL } from 'url'
+import { fileURLToPath } from 'url'
 import { createInterface } from 'readline'
 import checkbox from '@inquirer/checkbox'
 import { log } from './logger.js'
@@ -328,7 +328,16 @@ async function main(): Promise<void> {
   await startServer()
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function isCliEntrypoint(argvPath: string | undefined = process.argv[1]): boolean {
+  if (!argvPath) return false
+  try {
+    return realpathSync(argvPath) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isCliEntrypoint()) {
   main().catch(e => {
     log('CLI', 'error', `Fatal error: ${e}`)
     process.exit(1)

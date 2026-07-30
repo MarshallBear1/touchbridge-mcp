@@ -5,10 +5,20 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   upsertCodexConfig,
+  isCliEntrypoint,
   writeClaudeCodeConfig,
   writeCodexConfig,
   writeOpenCodeConfig,
 } from '../dist/cli.js'
+
+test('CLI entrypoint detection follows npm-style symlinks', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'touchbridge-cli-entrypoint-'))
+  t.after(async () => fs.rm(root, { recursive: true, force: true }))
+  const linkedCli = path.join(root, 'touchbridge')
+  await fs.symlink(path.resolve('dist/cli.js'), linkedCli)
+  assert.equal(isCliEntrypoint(linkedCli), true)
+  assert.equal(isCliEntrypoint(path.join(root, 'missing')), false)
+})
 
 test('upsertCodexConfig upgrades an existing interactive command and preserves its env section', () => {
   const existing = [
