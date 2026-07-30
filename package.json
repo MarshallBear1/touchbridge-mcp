@@ -1,0 +1,63 @@
+{
+  "name": "touchbridge-mcp",
+  "version": "0.1.0",
+  "description": "Secure MCP control, testing, and design capture for iOS simulators and physical devices",
+  "type": "module",
+  "license": "MIT",
+  "author": "Marshall Gould",
+  "homepage": "https://github.com/MarshallBear1/touchbridge-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/MarshallBear1/touchbridge-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "ios",
+    "iphone",
+    "simulator",
+    "automation",
+    "testing",
+    "figma",
+    "ai-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MarshallBear1/touchbridge-mcp.git"
+  },
+  "bin": {
+    "touchbridge": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "assets",
+    "NOTICE.md",
+    "src/idb/ax-scan/ax-scan.m",
+    "src/idb/ax-scan/Makefile"
+  ],
+  "engines": {
+    "node": ">=20.17"
+  },
+  "scripts": {
+    "build": "tsc",
+    "benchmark:gesture-visualization": "node scripts/benchmark-gesture-visualization.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run check"
+  },
+  "dependencies": {
+    "@inquirer/checkbox": "^5.2.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "unix-dgram": "^2.0.7",
+    "ws": "^8.21.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}

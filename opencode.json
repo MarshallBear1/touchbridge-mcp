@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "touchbridge-ios": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "github:MarshallBear1/touchbridge-mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
