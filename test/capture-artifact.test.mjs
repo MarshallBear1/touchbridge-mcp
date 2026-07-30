@@ -9,12 +9,16 @@ import {
   CAPTURE_MANIFEST_VERSION,
   CAPTURE_UI_SCHEMA,
   CAPTURE_UI_VERSION,
+  EDITOR_LAYER_MAP_SCHEMA,
+  EDITOR_LAYER_MAP_VERSION,
   HANDOFF_CONTRACT,
   HANDOFF_CONTRACT_VERSION,
   SCREEN_PNG_FILENAME,
   PREVIEW_PNG_FILENAME,
   UI_JSON_FILENAME,
+  EDITOR_JSON_FILENAME,
   sanitizeCaptureName,
+  sanitizeEditorIntent,
   buildCaptureId,
   captureDirectoryName,
   createCaptureDirectory,
@@ -24,6 +28,7 @@ import {
   isSensitiveUiElement,
   redactSensitiveUiElements,
   deriveScreenPointSize,
+  buildEditorLayerMap,
 } from '../dist/capture-artifact.js'
 
 test('sanitizeCaptureName slugifies human names', () => {
@@ -40,6 +45,21 @@ test('sanitizeCaptureName returns null for blank or unusable names', () => {
   assert.equal(sanitizeCaptureName('...'), null)
   assert.equal(sanitizeCaptureName('///'), null)
   assert.equal(sanitizeCaptureName('!!!***'), null)
+})
+
+test('sanitizeEditorIntent preserves voice instructions while redacting assigned secrets', () => {
+  assert.equal(
+    sanitizeEditorIntent('  Make   this editable in Figma and label the controls  '),
+    'Make this editable in Figma and label the controls',
+  )
+  assert.equal(
+    sanitizeEditorIntent('Rebuild the login screen; password is hunter2 and api key: sk-test-value'),
+    'Rebuild the login screen; password is [REDACTED] and api key: [REDACTED]',
+  )
+  assert.equal(sanitizeEditorIntent('Design a password recovery screen'), 'Design a password recovery screen')
+  assert.equal(sanitizeEditorIntent('  '), null)
+  assert.equal(sanitizeEditorIntent(null), null)
+  assert.equal(sanitizeEditorIntent('x'.repeat(700)).length, 500)
 })
 
 test('sanitizeCaptureName neutralizes path traversal attempts', () => {
@@ -159,6 +179,67 @@ test('deriveScreenPointSize falls back to the largest origin frame and rejects m
   assert.equal(deriveScreenPointSize([{ frame: null }, {}]), null)
 })
 
+test('buildEditorLayerMap creates normalized, semantic, Figma-ready layers', () => {
+  const map = buildEditorLayerMap({
+    captureId: 'capture-123',
+    intent: 'Make this editable in Figma',
+    screenPointSize: { width: 420, height: 912 },
+    pixelSize: { width: 1260, height: 2736 },
+    elements: [
+      { type: 'Application', role: 'AXApplication', frame: { x: 0, y: 0, width: 420, height: 912 } },
+      {
+        type: 'Button',
+        role_description: 'button',
+        AXLabel: 'Continue',
+        AXValue: '',
+        enabled: true,
+        frame: { x: 42, y: 456, width: 336, height: 52 },
+      },
+      {
+        type: 'StaticText',
+        AXLabel: 'Account balance',
+        AXValue: '[REDACTED]',
+        frame: { x: 21, y: 91.2, width: 210, height: 24 },
+      },
+      { type: 'Button', AXLabel: 'Broken', frame: { x: 0, y: 0, width: 0, height: 44 } },
+    ],
+  })
+
+  assert.equal(map.schema, EDITOR_LAYER_MAP_SCHEMA)
+  assert.equal(map.schema_version, EDITOR_LAYER_MAP_VERSION)
+  assert.equal(map.capture_id, 'capture-123')
+  assert.equal(map.intent, 'Make this editable in Figma')
+  assert.deepEqual(map.canvas.pixels_per_point, { x: 3, y: 3 })
+  assert.equal(map.layers.length, 2)
+  assert.deepEqual(map.layers[0], {
+    id: 'ax-002',
+    name: 'Continue',
+    source_type: 'Button',
+    semantic_role: 'button',
+    interactive: true,
+    enabled: true,
+    value: null,
+    frame: { x: 42, y: 456, width: 336, height: 52 },
+    normalized_frame: { x: 0.1, y: 0.5, width: 0.8, height: 0.057018 },
+  })
+  assert.equal(map.layers[1].interactive, false)
+  assert.equal(map.layers[1].value, '[REDACTED]')
+  assert.equal(map.figma.suggested_frame_name, 'TouchBridge / Make this editable in Figma')
+})
+
+test('buildEditorLayerMap rejects missing capture ids and invalid dimensions', () => {
+  const base = {
+    captureId: 'capture-123',
+    intent: null,
+    screenPointSize: { width: 420, height: 912 },
+    pixelSize: { width: 1260, height: 2736 },
+    elements: [],
+  }
+  assert.throws(() => buildEditorLayerMap({ ...base, captureId: ' ' }))
+  assert.throws(() => buildEditorLayerMap({ ...base, screenPointSize: { width: 0, height: 912 } }))
+  assert.throws(() => buildEditorLayerMap({ ...base, pixelSize: { width: 1260, height: Number.NaN } }))
+})
+
 function manifestInput(overrides = {}) {
   return {
     id: '2026-07-30T12-34-56-789Z-ab12cd34',
@@ -171,6 +252,8 @@ function manifestInput(overrides = {}) {
     preview: { fileName: PREVIEW_PNG_FILENAME },
     screenPointSize: { width: 393, height: 852 },
     ui: { fileName: UI_JSON_FILENAME, elementCount: 42 },
+    intent: 'Make the login screen editable in Figma',
+    editor: { fileName: EDITOR_JSON_FILENAME, layerCount: 12 },
     ...overrides,
   }
 }
@@ -181,7 +264,11 @@ test('buildCaptureManifest produces the v1 shape with a handoff contract', () =>
 
   assert.equal(manifest.schema, CAPTURE_MANIFEST_SCHEMA)
   assert.equal(manifest.schema_version, CAPTURE_MANIFEST_VERSION)
-  assert.deepEqual(manifest.handoff, { contract: HANDOFF_CONTRACT, version: HANDOFF_CONTRACT_VERSION })
+  assert.deepEqual(manifest.handoff, {
+    contract: HANDOFF_CONTRACT,
+    version: HANDOFF_CONTRACT_VERSION,
+    intent: 'Make the login screen editable in Figma',
+  })
   assert.deepEqual(manifest.capture, {
     id: input.id,
     name: 'login-screen',
@@ -207,6 +294,12 @@ test('buildCaptureManifest produces the v1 shape with a handoff contract', () =>
     format: `${CAPTURE_UI_SCHEMA}@${CAPTURE_UI_VERSION}`,
     element_count: 42,
   })
+  assert.deepEqual(manifest.editor, {
+    path: path.join(input.directory, EDITOR_JSON_FILENAME),
+    file: EDITOR_JSON_FILENAME,
+    format: `${EDITOR_LAYER_MAP_SCHEMA}@${EDITOR_LAYER_MAP_VERSION}`,
+    layer_count: 12,
+  })
 })
 
 test('buildCaptureManifest supports unnamed captures and omitted optional artifacts', () => {
@@ -215,12 +308,16 @@ test('buildCaptureManifest supports unnamed captures and omitted optional artifa
     preview: null,
     screenPointSize: null,
     ui: null,
+    intent: null,
+    editor: null,
     targetKind: 'physical-device',
   }))
   assert.equal(manifest.capture.name, null)
   assert.equal(manifest.preview, null)
   assert.equal(manifest.screen_points, null)
   assert.equal(manifest.ui, null)
+  assert.equal(manifest.handoff.intent, null)
+  assert.equal(manifest.editor, null)
   assert.equal(manifest.source.target, 'physical-device')
 })
 
@@ -237,5 +334,8 @@ test('buildCaptureManifest rejects invalid inputs', () => {
   })))
   assert.throws(() => buildCaptureManifest(manifestInput({
     ui: { fileName: UI_JSON_FILENAME, elementCount: -1 },
+  })))
+  assert.throws(() => buildCaptureManifest(manifestInput({
+    editor: { fileName: EDITOR_JSON_FILENAME, layerCount: -1 },
   })))
 })

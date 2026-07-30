@@ -21,11 +21,13 @@ import {
   SCREEN_PNG_FILENAME,
   PREVIEW_PNG_FILENAME,
   UI_JSON_FILENAME,
+  EDITOR_JSON_FILENAME,
   MANIFEST_FILENAME,
   CAPTURE_UI_SCHEMA,
   CAPTURE_UI_VERSION,
   defaultCapturesRoot,
   sanitizeCaptureName,
+  sanitizeEditorIntent,
   createCaptureDirectory,
   readPngPixelDimensions,
   writePreviewPng,
@@ -33,6 +35,7 @@ import {
   buildCaptureManifest,
   redactSensitiveUiElements,
   deriveScreenPointSize,
+  buildEditorLayerMap,
 } from './capture-artifact.js'
 import { runDoctor } from './doctor.js'
 import { PACKAGE_VERSION } from './version.js'
@@ -509,21 +512,24 @@ Use this when the user asks to "capture this screen/slide for editing". For a qu
 Saves into a unique folder under ~/.touchbridge/captures/:
 - screen.png — full-resolution screenshot
 - ui.json — structured UI/accessibility elements (unless include_ui is false)
+- editor.json — normalized, Figma-ready layers plus the sanitized voice/editing intent
 - manifest.json — machine-readable manifest with a "design-snapshot" handoff contract for orchestrators
 
 Returns the manifest data as JSON (including all artifact paths) plus a downscaled preview image.`,
       inputSchema: {
         udid: z.string().optional().describe('Device identifier (default: "booted")'),
         name: z.string().optional().describe('Optional human-friendly capture name, e.g. "login screen" (sanitized into the folder name)'),
+        intent: z.string().max(2000).optional().describe('Optional voice/editing instruction to preserve in the handoff, e.g. "make this editable in Figma and label the controls"'),
         include_ui: z.boolean().optional().describe('Also capture structured UI/accessibility context (default: true)'),
       },
     },
-    async ({ udid = 'booted', name, include_ui = true }) => {
+    async ({ udid = 'booted', name, intent, include_ui = true }) => {
       log('MCP', 'log', `capture_design_snapshot udid=${udid} name=${name ?? '(none)'} include_ui=${include_ui}`)
       try {
         const resolvedUdid = await resolveActionUdid(udid)
         const targetKind = isPhysicalDeviceUdid(resolvedUdid) ? 'physical-device' as const : 'simulator' as const
         const safeName = sanitizeCaptureName(name)
+        const safeIntent = sanitizeEditorIntent(intent)
         const { id, directory } = await createCaptureDirectory(defaultCapturesRoot(), safeName)
 
         try {
@@ -548,6 +554,7 @@ Returns the manifest data as JSON (including all artifact paths) plus a downscal
           } catch { /* omitted from manifest */ }
 
           let ui: { fileName: string; elementCount: number } | null = null
+          let editorElements: Array<Record<string, unknown>> | null = null
           if (include_ui) {
             const client = await getDeviceClient(resolvedUdid)
             const raw = await client.describeAll(false)
@@ -558,6 +565,7 @@ Returns the manifest data as JSON (including all artifact paths) plus a downscal
               screenPointSize?.width ?? 393,
               screenPointSize?.height ?? 852,
             ))
+            editorElements = elements
             await writeJsonArtifact(path.join(directory, UI_JSON_FILENAME), {
               schema: CAPTURE_UI_SCHEMA,
               schema_version: CAPTURE_UI_VERSION,
@@ -565,6 +573,19 @@ Returns the manifest data as JSON (including all artifact paths) plus a downscal
               elements,
             })
             ui = { fileName: UI_JSON_FILENAME, elementCount: elements.length }
+          }
+
+          let editor: { fileName: string; layerCount: number } | null = null
+          if (editorElements && screenPointSize) {
+            const editorMap = buildEditorLayerMap({
+              captureId: id,
+              intent: safeIntent,
+              screenPointSize,
+              pixelSize,
+              elements: editorElements,
+            })
+            await writeJsonArtifact(path.join(directory, EDITOR_JSON_FILENAME), editorMap)
+            editor = { fileName: EDITOR_JSON_FILENAME, layerCount: editorMap.layers.length }
           }
 
           const previewPath = path.join(directory, PREVIEW_PNG_FILENAME)
@@ -581,6 +602,8 @@ Returns the manifest data as JSON (including all artifact paths) plus a downscal
             preview: { fileName: PREVIEW_PNG_FILENAME },
             screenPointSize,
             ui,
+            intent: safeIntent,
+            editor,
           })
           const manifestPath = path.join(directory, MANIFEST_FILENAME)
           await writeJsonArtifact(manifestPath, manifest)
@@ -594,6 +617,7 @@ Returns the manifest data as JSON (including all artifact paths) plus a downscal
             preview: manifest.preview,
             screen_points: manifest.screen_points,
             ui: manifest.ui,
+            editor: manifest.editor,
             source: manifest.source,
             handoff: manifest.handoff,
           }

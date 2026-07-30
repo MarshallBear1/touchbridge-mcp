@@ -16,7 +16,15 @@ Run read-only environment diagnostics before troubleshooting setup failures. Rep
 
 ### capture_design_snapshot
 
-Create a durable full-resolution PNG, redacted UI/accessibility JSON, and a versioned handoff manifest beneath `~/.touchbridge/captures/`. Use this for voice requests such as “capture this screen/slide for editing” or when another MCP will continue in Figma, Slides, or an image editor. Keep `get_screenshot` for temporary visual checks.
+Create a durable full-resolution PNG, redacted UI/accessibility JSON, normalized `editor.json`, and a versioned handoff manifest beneath `~/.touchbridge/captures/`. Pass the user's spoken editing request in `intent`; TouchBridge sanitizes it and preserves it for Figma, Slides, or another editor. Keep `get_screenshot` for temporary visual checks.
+
+```json
+{
+  "name": "checkout-review",
+  "intent": "Make this editable in Figma and label every interactive control",
+  "include_ui": true
+}
+```
 
 ### get_execution_context
 

@@ -8,17 +8,17 @@ The useful product boundary is larger than remote taps: TouchBridge is the visua
 
 An MCP host can translate that into:
 
-1. Call `capture_design_snapshot` with `{ "name": "pricing slide" }`.
+1. Call `capture_design_snapshot` with `{ "name": "pricing-slide", "intent": "Preserve the phone dimensions, make this editable in Figma, and label the pricing controls" }`.
 2. Inspect the returned preview with the model.
-3. Read `manifest.json` for the full-resolution image, point/pixel dimensions, and accessibility geometry.
-4. Call a connected Figma, Slides, image-editing, or document tool with the PNG and the user's requested changes.
+3. Read `manifest.json` for artifact paths and `editor.json` for the sanitized intent, exact point/pixel scale, normalized frames, semantic roles, and interactivity.
+4. Call a connected Figma, Slides, image-editing, or document tool with the PNG and the editor layer map.
 5. Return the created design URL or artifact to the user.
 
 ```mermaid
 flowchart LR
   V["Voice request"] --> H["MCP host / orchestrator"]
   H --> B["TouchBridge capture_design_snapshot"]
-  B --> A["PNG + UI JSON + manifest"]
+  B --> A["PNG + UI JSON + editor JSON + manifest"]
   A --> H
   H --> E["Figma / Slides / editor MCP"]
   E --> R["Editable design artifact"]
@@ -31,10 +31,23 @@ A PNG alone gives an editor pixels. The manifest also gives it:
 - full-resolution pixel dimensions;
 - the phone coordinate space in points;
 - labels, element types, and frames for visible UI;
+- normalized editor geometry and interactivity flags;
+- the sanitized spoken editing instruction;
 - a stable `design-snapshot@1` contract;
 - the exact source target and capture time.
 
 That is enough for an orchestrator to reconstruct editable layers, compare revisions, annotate bugs, or generate a design specification without putting design-service credentials inside TouchBridge.
+
+## Host orchestration recipe
+
+When a voice-capable host receives “capture this and make it editable in Figma”:
+
+1. Preserve the user's words in the `intent` parameter instead of paraphrasing away constraints.
+2. Use the full-resolution `screen.png` as the image fill.
+3. Size the Figma frame from `editor.json.canvas.width` / `height`.
+4. Position editable overlays from each layer's point `frame` or `normalized_frame`.
+5. Name layers with `name` and include `semantic_role`, `interactive`, and `enabled` in annotations or shared plugin data.
+6. Render the resulting Figma frame and visually compare it with `preview.png`.
 
 ## High-value extensions
 

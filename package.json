@@ -1,6 +1,6 @@
 {
   "name": "touchbridge-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Secure MCP control, testing, and design capture for iOS simulators and physical devices",
   "type": "module",
   "license": "MIT",

@@ -6,7 +6,7 @@
 
 TouchBridge is a local-first MCP server for iOS simulators and physical devices. It gives ChatGPT, Codex, Claude, Cursor, and other MCP hosts a reliable action layer for app testing—and a structured screenshot bridge for voice-driven design work.
 
-The design workflow is the unusual bit: “capture this screen for editing” produces a full-resolution image, redacted accessibility geometry, a preview, and a versioned manifest. An orchestrating agent can then reconstruct the screen in Figma, annotate it, compare revisions, or hand it to another editor.
+The design workflow is the unusual bit: “capture this screen for editing” produces a full-resolution image, redacted accessibility geometry, normalized editor layers, the sanitized spoken instruction, a preview, and a versioned manifest. An orchestrating agent can reconstruct the screen in Figma without reverse-engineering the raw accessibility tree.
 
 ## Why TouchBridge
 
@@ -14,6 +14,7 @@ The design workflow is the unusual bit: “capture this screen for editing” pr
 - Active-device filtering avoids stale, paired, or disconnected hardware.
 - Sensitive text is redacted from tool results, logs, and design artifacts.
 - Durable design snapshots are useful beyond a single agent session.
+- `editor.json` provides named layers, normalized frames, interactivity, image scale, and Figma styling hints.
 - A loopback-only live viewer never binds to the public network.
 - `doctor` diagnoses the entire local toolchain in one call.
 - CI covers Node 20.17 and Node 22, with no production audit findings.
@@ -89,7 +90,7 @@ and label anything that fails accessibility checks.
 | `device_action` | Perform one tap, swipe, key, button, or text action |
 | `device_actions` | Perform a sequence of actions |
 | `get_screenshot` | Capture a temporary screenshot for visual verification |
-| `capture_design_snapshot` | Create a durable, redacted design handoff bundle |
+| `capture_design_snapshot` | Create a durable, redacted handoff with voice intent and Figma-ready layers |
 | `list_devices` | List active simulators and physical devices |
 | `launch_app` | Launch an installed app by bundle identifier |
 | `list_apps` | List installed apps |
