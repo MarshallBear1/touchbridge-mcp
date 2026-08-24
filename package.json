@@ -31,7 +31,6 @@
     "docs",
     "assets",
     "CHANGELOG.md",
-    "NOTICE.md",
     "src/idb/ax-scan/ax-scan.m",
     "src/idb/ax-scan/Makefile"
   ],
