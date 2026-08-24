@@ -217,6 +217,6 @@ CI runs the audit, typecheck, tests, and fresh-consumer package smoke test on ma
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. Keep device actions deterministic, bound externally supplied values, avoid logging screen content or typed text, and add regression tests for physical and simulator paths.
 
-## License and attribution
+## License
 
-TouchBridge is MIT licensed. It includes work derived from the MIT-licensed `iPhone-mcp` project; the required upstream copyright notice is preserved in [LICENSE](LICENSE), with provenance in [NOTICE.md](NOTICE.md).
+MIT. See [LICENSE](LICENSE).
