@@ -16,7 +16,7 @@ Run read-only environment diagnostics before troubleshooting setup failures. Rep
 
 ### capture_design_snapshot
 
-Create a durable full-resolution PNG, redacted UI/accessibility JSON, normalized `editor.json`, and a versioned handoff manifest beneath `~/.touchbridge/captures/`. Pass the user's spoken editing request in `intent`; TouchBridge sanitizes it and preserves it for Figma, Slides, or another editor. Keep `get_screenshot` for temporary visual checks.
+Create a durable full-resolution PNG, redacted UI/accessibility JSON, normalized `editor.json`, and a versioned handoff manifest beneath `~/.touchbridge/captures/`. Pass the user's spoken editing request in `intent`; TouchBridge sanitizes it and preserves it for Figma, Slides, or another editor. Screenshot pixels are unredacted and may contain sensitive content. Keep `get_screenshot` for temporary visual checks and delete its returned file after use.
 
 ```json
 {

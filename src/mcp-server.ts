@@ -39,52 +39,20 @@ import {
 } from './capture-artifact.js'
 import { runDoctor } from './doctor.js'
 import { PACKAGE_VERSION } from './version.js'
-import { MCP_SERVER_NAME } from './brand.js'
+import { MCP_SERVER_NAME, WDA_REPOSITORY_URL, WDA_VERSION } from './brand.js'
 import { buildViewerUrl } from './viewer/server.js'
-
-const tapParamsSchema = z.object({
-  x: z.number().describe('X coordinate to tap'),
-  y: z.number().describe('Y coordinate to tap'),
-  duration: z.number().optional().describe('Tap duration in seconds'),
-})
-
-const swipeParamsSchema = z.object({
-  fromX: z.number().describe('Starting X coordinate'),
-  fromY: z.number().describe('Starting Y coordinate'),
-  toX: z.number().describe('Ending X coordinate'),
-  toY: z.number().describe('Ending Y coordinate'),
-  duration: z.number().optional().describe('Swipe duration in seconds'),
-  delta: z.number().optional().describe('Pixels between touch points'),
-})
-
-const buttonParamsSchema = z.object({
-  button: z.enum(['HOME', 'LOCK', 'SIDE_BUTTON', 'APPLE_PAY', 'SIRI']).describe('Button to press'),
-  duration: z.number().optional().describe('Press duration in seconds'),
-})
-
-const inputTextParamsSchema = z.object({
-  text: z.string().describe('Text to type'),
-})
-
-const keyParamsSchema = z.object({
-  key: z.union([z.number(), z.string()]).describe('HID keycode (number) or character (string)'),
-  duration: z.number().optional().describe('Key press duration in seconds'),
-})
-
-const keySequenceParamsSchema = z.object({
-  keySequence: z.array(z.union([z.number(), z.string()])).describe('Sequence of HID keycodes or characters'),
-})
-
-const describeAfterSchema = z.object({
-  point: z.object({ x: z.number(), y: z.number() }).optional().describe('Describe element at this point after action'),
-  all: z.boolean().optional().describe('Describe all elements on screen after action'),
-  delay: z.number().optional().describe('Delay in ms before capturing screen state (default: 500)'),
-}).optional()
-
-const singleActionSchema = z.object({
-  action: z.enum(['tap', 'swipe', 'button', 'input-text', 'key', 'key-sequence']).describe('Type of action to perform'),
-  params: z.record(z.string(), z.unknown()).describe('Action-specific parameters'),
-})
+import {
+  actionBatchSchema,
+  buttonParamsSchema,
+  describeAfterSchema,
+  inputTextParamsSchema,
+  keyParamsSchema,
+  keySequenceParamsSchema,
+  summarizeKeyAction,
+  summarizeKeySequence,
+  swipeParamsSchema,
+  tapParamsSchema,
+} from './action-validation.js'
 
 const referenceFrameCache = new Map<string, Promise<{ width: number; height: number }>>()
 const BOOTED_UDID_CACHE_TTL_MS = 5_000
@@ -238,8 +206,8 @@ Actions available:
 - swipe: Swipe gesture { fromX, fromY, toX, toY, duration?, delta? }
 - button: Press button { button: 'HOME'|'LOCK'|'SIDE_BUTTON'|'APPLE_PAY'|'SIRI', duration? }
 - input-text: Type text { text }
-- key: Press key { key: number (HID keycode) | string (character), duration? }
-- key-sequence: Press key sequence { keySequence: (number|string)[] }
+- key: Press key { key: number (simulator-only HID keycode) | string (text key), duration? }
+- key-sequence: Press key sequence { keySequence: (number|string)[] }; numeric HID values are simulator-only
 
 Use describe_after to see the screen state after the action.`,
       inputSchema: {
@@ -298,13 +266,13 @@ Use describe_after to see the screen state after the action.`,
           case 'key': {
             const p = keyParamsSchema.parse(params)
             await client.pressKey(p.key, p.duration)
-            actionResult = `Pressed key: ${p.key}`
+            actionResult = summarizeKeyAction(p.key)
             break
           }
           case 'key-sequence': {
             const p = keySequenceParamsSchema.parse(params)
             await client.pressKeySequence(p.keySequence)
-            actionResult = `Pressed key sequence: ${p.keySequence.join(', ')}`
+            actionResult = summarizeKeySequence(p.keySequence)
             break
           }
         }
@@ -345,19 +313,21 @@ Each action in the array should have:
 
 Use describe_after to see the screen state after all actions complete.`,
       inputSchema: {
-        actions: z.array(singleActionSchema).describe('Array of actions to execute in sequence'),
+        actions: actionBatchSchema.describe('Array of 1-100 actions to execute in sequence'),
         udid: z.string().optional().describe('Device identifier (default: "booted")'),
         describe_after: describeAfterSchema.describe('Optional: describe screen after all actions'),
       },
     },
     async ({ actions, udid = 'booted', describe_after }) => {
       log('MCP', 'log', `device_actions count=${actions.length} udid=${udid}`)
+      let actionIndex = -1
       try {
         const resolvedUdid = await resolveActionUdid(udid)
         const client = await getDeviceClient(resolvedUdid)
         const results: string[] = []
 
         for (const [index, { action, params }] of actions.entries()) {
+          actionIndex = index
           switch (action) {
             case 'tap': {
               const p = tapParamsSchema.parse(params)
@@ -400,13 +370,13 @@ Use describe_after to see the screen state after all actions complete.`,
             case 'key': {
               const p = keyParamsSchema.parse(params)
               await client.pressKey(p.key, p.duration)
-              results.push(`Pressed key: ${p.key}`)
+              results.push(summarizeKeyAction(p.key))
               break
             }
             case 'key-sequence': {
               const p = keySequenceParamsSchema.parse(params)
               await client.pressKeySequence(p.keySequence)
-              results.push(`Pressed key sequence: ${p.keySequence.join(', ')}`)
+              results.push(summarizeKeySequence(p.keySequence))
               break
             }
           }
@@ -429,8 +399,9 @@ Use describe_after to see the screen state after all actions complete.`,
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         }
       } catch (error) {
+        const location = actionIndex >= 0 ? ` at action ${actionIndex + 1} of ${actions.length}` : ''
         return {
-          content: [{ type: 'text' as const, text: `Error executing actions: ${error instanceof Error ? error.message : String(error)}` }],
+          content: [{ type: 'text' as const, text: `Error executing actions${location}: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true,
         }
       }
@@ -440,17 +411,19 @@ Use describe_after to see the screen state after all actions complete.`,
   server.registerTool(
     'get_screenshot',
     {
-      description: 'Capture a screenshot of the current iPhone screen. Returns the file path to a PNG image.',
+      description: 'Capture an unredacted screenshot of the current iPhone screen in a private temporary directory. Returns the full-resolution PNG path and an embedded preview. Delete the returned file after use.',
       inputSchema: {
         udid: z.string().optional().describe('Device identifier (default: "booted")'),
       },
     },
     async ({ udid = 'booted' }) => {
       log('MCP', 'log', `get_screenshot udid=${udid}`)
+      let screenshotDirectory: string | null = null
       try {
-        const timestamp = Date.now()
-        const rawFile = path.join(os.tmpdir(), `touchbridge-screenshot-${timestamp}.png`)
-        const resizedFile = path.join(os.tmpdir(), `touchbridge-screenshot-${timestamp}-sm.png`)
+        screenshotDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'touchbridge-screenshot-'))
+        await fs.chmod(screenshotDirectory, 0o700)
+        const rawFile = path.join(screenshotDirectory, 'screen.png')
+        const resizedFile = path.join(screenshotDirectory, 'preview.png')
 
         if (isPhysicalDeviceUdid(udid)) {
           const client = await getDeviceClient(udid)
@@ -487,13 +460,19 @@ Use describe_after to see the screen state after all actions complete.`,
           )
         })
 
+        const previewData = (await fs.readFile(resizedFile)).toString('base64')
+        await fs.unlink(resizedFile).catch(() => {})
+
         return {
           content: [
             { type: 'text' as const, text: rawFile },
-            { type: 'image' as const, data: (await fs.readFile(resizedFile)).toString('base64'), mimeType: 'image/png' },
+            { type: 'image' as const, data: previewData, mimeType: 'image/png' },
           ],
         }
       } catch (error) {
+        if (screenshotDirectory) {
+          await fs.rm(screenshotDirectory, { recursive: true, force: true }).catch(() => {})
+        }
         return {
           content: [{ type: 'text' as const, text: `Error capturing screenshot: ${error instanceof Error ? error.message : String(error)}` }],
           isError: true,
@@ -510,7 +489,7 @@ Use describe_after to see the screen state after all actions complete.`,
 Use this when the user asks to "capture this screen/slide for editing". For a quick throwaway screenshot, use get_screenshot instead.
 
 Saves into a unique folder under ~/.touchbridge/captures/:
-- screen.png — full-resolution screenshot
+- screen.png — full-resolution, unredacted screenshot (pixels may contain sensitive content)
 - ui.json — structured UI/accessibility elements (unless include_ui is false)
 - editor.json — normalized, Figma-ready layers plus the sanitized voice/editing intent
 - manifest.json — machine-readable manifest with a "design-snapshot" handoff contract for orchestrators
@@ -922,7 +901,7 @@ After setup completes, use the returned udid for all subsequent tool calls. Also
         const derivedData = wdaManager.getDerivedDataPathPublic()
 
         const cloneCmd = wdaPath ? null
-          : `git clone --depth 1 https://github.com/appium/WebDriverAgent.git ${derivedData}/WebDriverAgent`
+          : `git clone --depth 1 --branch "${WDA_VERSION}" "${WDA_REPOSITORY_URL}" "${derivedData}/WebDriverAgent"`
         const projectPath = wdaPath ?? `${derivedData}/WebDriverAgent`
 
         const buildCmd = `xcodebuild build-for-testing -project "${projectPath}/WebDriverAgent.xcodeproj" -scheme WebDriverAgentRunner -destination 'generic/platform=iOS' -derivedDataPath "${derivedData}" -allowProvisioningUpdates DEVELOPMENT_TEAM=${teamId}`

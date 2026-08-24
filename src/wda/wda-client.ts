@@ -2,13 +2,17 @@ import { log } from '../logger.js'
 
 interface WDAElement {
   type: string
-  label: string | null
-  name: string | null
-  value: string | null
-  rect: { x: number; y: number; width: number; height: number }
-  isEnabled: boolean
-  isVisible: boolean
+  AXLabel: string | null
+  AXValue: string | null
+  title: string | null
+  frame: { x: number; y: number; width: number; height: number }
+  enabled: boolean
+  visible: boolean
   children?: WDAElement[]
+}
+
+export class UnsupportedOperationError extends Error {
+  override name = 'UnsupportedOperationError'
 }
 
 interface WDASessionResponse {
@@ -220,12 +224,21 @@ export class WDAClient {
       await this.inputText(key)
       return
     }
-    log('WDAClient', 'warn', `pressKey with HID keycode ${key} not supported on physical device`)
+    throw new UnsupportedOperationError(
+      `Numeric HID keycode ${key} is not supported on physical devices; use a text key instead`,
+    )
   }
 
   async pressKeySequence(keySequence: (number | string)[]): Promise<void> {
-    const text = keySequence.filter((k): k is string => typeof k === 'string').join('')
-    if (text) await this.inputText(text)
+    const unsupportedKey = keySequence.find((key): key is number => typeof key === 'number')
+    if (unsupportedKey !== undefined) {
+      throw new UnsupportedOperationError(
+        `Numeric HID keycode ${unsupportedKey} is not supported in physical-device key sequences`,
+      )
+    }
+    const text = keySequence.join('')
+    if (!text) throw new Error('Key sequence must contain at least one text key')
+    await this.inputText(text)
   }
 
   async screenshot(): Promise<Buffer> {
@@ -319,46 +332,50 @@ export class WDAClient {
   private normalizeElement(raw: Record<string, unknown>): Record<string, unknown> {
     return {
       type: this.normalizeElementType(raw.type as string ?? ''),
-      AXLabel: raw.label ?? null,
-      AXValue: raw.value ?? null,
-      frame: raw.rect ?? { x: 0, y: 0, width: 0, height: 0 },
-      enabled: raw.isEnabled ?? true,
-      visible: raw.isVisible ?? true,
+      AXLabel: raw.AXLabel ?? raw.label ?? null,
+      AXValue: raw.AXValue ?? raw.value ?? null,
+      title: raw.title ?? raw.name ?? null,
+      frame: raw.frame ?? raw.rect ?? { x: 0, y: 0, width: 0, height: 0 },
+      AXUniqueId: raw.AXUniqueId ?? null,
+      enabled: raw.enabled ?? raw.isEnabled ?? true,
+      visible: raw.visible ?? raw.isVisible ?? true,
     }
   }
 
-  private findElementAtPoint(tree: unknown, x: number, y: number): unknown {
+  findElementAtPoint(tree: unknown, x: number, y: number): unknown {
     if (!tree || typeof tree !== 'object') return null
     const elements = Array.isArray(tree) ? tree : (tree as { children?: unknown[] }).children ?? []
 
-    let best: WDAElement | null = null
+    let best: Record<string, unknown> | null = null
     let bestArea = Infinity
 
-    for (const el of elements as WDAElement[]) {
-      const r = el.rect ?? { x: 0, y: 0, width: 0, height: 0 }
-      if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
+    for (const rawElement of elements as Record<string, unknown>[]) {
+      const element = this.normalizeElement(rawElement)
+      const r = element.frame as WDAElement['frame']
+      if (r.width > 0 && r.height > 0 && x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) {
         const area = r.width * r.height
         if (area < bestArea) {
           bestArea = area
-          best = el
+          best = element
         }
       }
-      if (el.children) {
-        const child = this.findElementAtPoint({ children: el.children }, x, y)
+      const children = rawElement.children
+      if (Array.isArray(children)) {
+        const child = this.findElementAtPoint(children, x, y)
         if (child) {
-          const cr = (child as WDAElement).rect
+          const cr = (child as WDAElement).frame
           if (cr) {
             const childArea = cr.width * cr.height
             if (childArea < bestArea) {
               bestArea = childArea
-              best = child as WDAElement
+              best = child as Record<string, unknown>
             }
           }
         }
       }
     }
 
-    return best ? this.normalizeElement(best as unknown as Record<string, unknown>) : null
+    return best
   }
 
   async activateApp(bundleId: string): Promise<void> {

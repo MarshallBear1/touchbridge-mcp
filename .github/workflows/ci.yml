@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: macos-latest
@@ -24,3 +28,4 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm run check
+      - run: npm run smoke:package

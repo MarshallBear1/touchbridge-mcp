@@ -1,10 +1,10 @@
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { log } from '../logger.js'
 import { childEnv } from '../child-env.js'
-import { WDAClient } from './wda-client.js'
+import { wdaManager } from './wda-manager.js'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 
 export interface PhysicalDevice {
   udid: string
@@ -58,14 +58,47 @@ export function parseDevicectlDevice(d: unknown): PhysicalDevice | null {
   }
 }
 
+export function hasInstalledWdaRunner(apps: unknown): boolean {
+  if (!Array.isArray(apps)) return false
+  return apps.some((app) => {
+    if (!app || typeof app !== 'object') return false
+    const record = app as Record<string, unknown>
+    const name = String(record.name ?? '').toLowerCase()
+    const bundleIdentifier = String(record.bundleIdentifier ?? '').toLowerCase()
+    return name.includes('webdriveragentrunner') || bundleIdentifier.includes('webdriveragentrunner')
+  })
+}
+
+function parseJsonOutput(stdout: string): unknown {
+  const jsonStart = stdout.indexOf('{')
+  if (jsonStart < 0) throw new Error('No JSON in command output')
+  return JSON.parse(stdout.substring(jsonStart))
+}
+
+async function isWdaRunnerInstalled(udid: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      'xcrun',
+      ['devicectl', 'device', 'info', 'apps', '--device', udid, '--json-output', '/dev/stdout'],
+      { env: childEnv(), timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
+    )
+    const json = parseJsonOutput(stdout) as { result?: { apps?: unknown } }
+    return hasInstalledWdaRunner(json.result?.apps)
+  } catch {
+    return false
+  }
+}
+
 export async function listPhysicalDevices(): Promise<PhysicalDevice[]> {
   const devices: Map<string, PhysicalDevice> = new Map()
 
   try {
-    const { stdout } = await execAsync('xcrun devicectl list devices --json-output /dev/stdout 2>/dev/null', { env: childEnv() })
-    const jsonStart = stdout.indexOf('{')
-    if (jsonStart < 0) throw new Error('No JSON in devicectl output')
-    const json = JSON.parse(stdout.substring(jsonStart))
+    const { stdout } = await execFileAsync(
+      'xcrun',
+      ['devicectl', 'list', 'devices', '--json-output', '/dev/stdout'],
+      { env: childEnv(), timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
+    )
+    const json = parseJsonOutput(stdout) as { result?: { devices?: unknown[] } }
     const deviceList = json?.result?.devices ?? []
 
     for (const d of deviceList) {
@@ -80,7 +113,11 @@ export async function listPhysicalDevices(): Promise<PhysicalDevice[]> {
 
   if (devices.size === 0) {
     try {
-      const { stdout } = await execAsync('system_profiler SPUSBDataType -json 2>/dev/null', { env: childEnv() })
+      const { stdout } = await execFileAsync(
+        'system_profiler',
+        ['SPUSBDataType', '-json'],
+        { env: childEnv(), timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
+      )
       const json = JSON.parse(stdout)
       const usbItems = json?.SPUSBDataType ?? []
 
@@ -115,14 +152,14 @@ export async function listPhysicalDevices(): Promise<PhysicalDevice[]> {
   const deviceList = Array.from(devices.values())
   await Promise.all(
     deviceList.map(async (device) => {
+      const installed = await isWdaRunnerInstalled(device.udid)
+      let running = false
       try {
-        const client = WDAClient.getInstance(device.udid)
-        const running = await client.isReachable()
-        device.wdaRunning = running
-        device.wdaInstalled = running
-      } catch {
-        // WDA not reachable
-      }
+        const tunnelAddress = await wdaManager.getTunnelAddress(device.udid)
+        running = await wdaManager.getClient(device.udid, tunnelAddress).isReachable()
+      } catch { /* WDA not reachable */ }
+      device.wdaRunning = running
+      device.wdaInstalled = installed || running
     })
   )
 

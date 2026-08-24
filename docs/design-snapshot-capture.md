@@ -4,7 +4,10 @@ The `capture_design_snapshot` MCP tool captures a durable, full-resolution snaps
 
 It is intended for voice-friendly flows like *"capture this screen for editing"*—one tool call, one self-contained artifact folder. TouchBridge never talks to Figma or any other design service and stores no design-tool credentials; it only produces artifacts on local disk that an orchestrator can pick up.
 
-For a quick throwaway screenshot (temp file, no manifest), keep using `get_screenshot` — its behavior is unchanged.
+For a quick throwaway screenshot (private temporary directory, no manifest), use `get_screenshot` and delete the returned file after use.
+
+> [!WARNING]
+> Screenshot pixels are not redacted. Both `screen.png` and `preview.png` can contain any text or imagery visible on the device. Redaction applies only to structured accessibility data and sanitized intent fields.
 
 ## Tool input
 
@@ -23,8 +26,8 @@ Each capture is written to a unique directory that is never reused:
 
 ```
 ~/.touchbridge/captures/<timestamp>-<random>[-<name>]/
-├── screen.png     # full-resolution screenshot (source of truth for editing)
-├── preview.png    # 1/3-scale preview (what the agent sees inline)
+├── screen.png     # full-resolution, unredacted screenshot (source of truth for editing)
+├── preview.png    # 1/3-scale, unredacted preview (what the agent sees inline)
 ├── ui.json        # filtered UI/accessibility elements (when include_ui)
 ├── editor.json    # normalized semantic layers + sanitized editing intent
 └── manifest.json  # manifest v1, see below
@@ -90,7 +93,7 @@ If any step fails, the directory is removed and the tool returns a normal MCP er
 - `editor.json` removes the application root and malformed frames, gives every remaining element a stable layer ID/name/semantic role, marks interactive elements, and supplies both point and normalized frames.
 - `editor.json.canvas.pixels_per_point` records the exact image-to-iOS coordinate scale. This is derived from the captured accessibility root, so custom simulator names do not introduce Figma overlay drift.
 - `editor.json.figma` provides a suggested frame name and default overlay treatment. These are hints, not credentials or direct Figma API calls.
-- Values from secure text fields and password/passcode/PIN/verification-code/API-key-like elements are replaced with `[REDACTED]` before the artifact is written.
+- Values from secure text fields and password/passcode/PIN/verification-code/API-key-like elements are replaced with `[REDACTED]` before structured JSON artifacts are written. This does not modify screenshot pixels.
 - Assigned secrets in `intent` (for example, `password is ...` or `api key: ...`) are replaced with `[REDACTED]`.
 
 ## Tool response

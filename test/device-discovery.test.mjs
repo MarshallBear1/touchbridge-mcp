@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseDevicectlDevice } from '../dist/wda/device-discovery.js'
+import { hasInstalledWdaRunner, parseDevicectlDevice } from '../dist/wda/device-discovery.js'
 
 function record(overrides = {}) {
   return {
@@ -62,4 +62,15 @@ test('parseDevicectlDevice rejects non-mobile Apple platforms and malformed reco
   })), null)
   assert.equal(parseDevicectlDevice({ hardwareProperties: { platform: 'iOS' } }), null)
   assert.equal(parseDevicectlDevice(null), null)
+})
+
+test('hasInstalledWdaRunner distinguishes installed runner apps from ordinary apps', () => {
+  assert.equal(hasInstalledWdaRunner([
+    { name: 'Juno', bundleIdentifier: 'com.example.juno' },
+    { name: 'WebDriverAgentRunner-Runner', bundleIdentifier: 'com.example.wda.xctrunner' },
+  ]), true)
+  assert.equal(hasInstalledWdaRunner([
+    { name: 'Juno', bundleIdentifier: 'com.example.juno' },
+  ]), false)
+  assert.equal(hasInstalledWdaRunner(null), false)
 })

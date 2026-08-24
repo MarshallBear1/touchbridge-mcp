@@ -1,13 +1,15 @@
-import { spawn, type ChildProcess, exec } from 'child_process'
+import { spawn, type ChildProcess, exec, execFile } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { log } from '../logger.js'
 import { childEnv } from '../child-env.js'
 import { WDAClient } from './wda-client.js'
-import { DEFAULT_INSTALL_SPEC, stateRoot } from '../brand.js'
+import { DEFAULT_INSTALL_SPEC, WDA_REPOSITORY_URL, WDA_VERSION, stateRoot } from '../brand.js'
 
 const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
+const DEVELOPMENT_TEAM_PATTERN = /^[A-Z0-9]{10}$/
 
 export type WDASetupStep =
   | 'connecting'
@@ -79,7 +81,7 @@ export class WDAManager {
 
       log('WDAManager', 'log', 'Cloning WebDriverAgent from GitHub...')
       await execAsync(
-        `git clone --depth 1 https://github.com/appium/WebDriverAgent.git "${wdaDir}"`,
+        `git clone --depth 1 --branch "${WDA_VERSION}" "${WDA_REPOSITORY_URL}" "${wdaDir}"`,
         { timeout: 120_000, env: childEnv() }
       )
       log('WDAManager', 'log', 'WebDriverAgent cloned successfully')
@@ -120,17 +122,66 @@ export class WDAManager {
   }
 
   private async detectTeamId(): Promise<string> {
-    // Try both keys: older Xcode uses IDEProvisioningTeams, newer versions use IDEProvisioningTeamByIdentifier
+    const override = process.env.TOUCHBRIDGE_DEVELOPMENT_TEAM?.trim()
+    if (override) {
+      if (!DEVELOPMENT_TEAM_PATTERN.test(override)) {
+        throw new Error('TOUCHBRIDGE_DEVELOPMENT_TEAM must be a 10-character Apple team ID.')
+      }
+      return override
+    }
+
+    const embeddedProfile = join(
+      this.getDerivedDataPath(),
+      'Build',
+      'Products',
+      'Debug-iphoneos',
+      'WebDriverAgentRunner-Runner.app',
+      'embedded.mobileprovision',
+    )
+    if (existsSync(embeddedProfile)) {
+      try {
+        const { stdout } = await execFileAsync('security', ['cms', '-D', '-i', embeddedProfile], {
+          env: childEnv(),
+          timeout: 10_000,
+          maxBuffer: 2 * 1024 * 1024,
+        })
+        const profileTeam = stdout.match(
+          /<key>TeamIdentifier<\/key>\s*<array>\s*<string>([A-Z0-9]{10})<\/string>/,
+        )?.[1]
+        if (profileTeam) return profileTeam
+      } catch { /* fall through to local team discovery */ }
+    }
+
+    const candidates = new Set<string>()
+    // Older and newer Xcode versions persist team hints under different keys.
     for (const key of ['IDEProvisioningTeams', 'IDEProvisioningTeamByIdentifier']) {
       try {
         const { stdout } = await execAsync(`defaults read com.apple.dt.Xcode ${key}`, { env: childEnv() })
-        const match = stdout.match(/teamID\s*=\s*([A-Z0-9]{10})/)
-        if (match) return match[1]
+        for (const match of stdout.matchAll(/teamID\s*=\s*([A-Z0-9]{10})/g)) candidates.add(match[1])
       } catch {
         // Key not available, try next
       }
     }
-    throw new Error('No development team found. Sign in to Xcode with your Apple ID first (Xcode -> Settings -> Accounts).')
+
+    try {
+      const { stdout } = await execFileAsync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+        env: childEnv(),
+        timeout: 10_000,
+      })
+      for (const match of stdout.matchAll(/\(([A-Z0-9]{10})\)/g)) candidates.add(match[1])
+    } catch { /* no usable signing identities */ }
+
+    if (candidates.size === 1) return [...candidates][0]
+    if (candidates.size > 1) {
+      throw new Error(
+        `Multiple Apple development teams found (${[...candidates].sort().join(', ')}). `
+        + 'Set TOUCHBRIDGE_DEVELOPMENT_TEAM to the team shown in Xcode -> Settings -> Apple Accounts.',
+      )
+    }
+    throw new Error(
+      'No development team found. Sign in to Xcode with your Apple ID first '
+      + '(Xcode -> Settings -> Apple Accounts), or set TOUCHBRIDGE_DEVELOPMENT_TEAM.',
+    )
   }
 
   async getTunnelAddress(udid: string): Promise<string> {
