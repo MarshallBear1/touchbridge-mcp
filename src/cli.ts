@@ -15,6 +15,8 @@ import {
   CONFIG_KEY,
   DEFAULT_INSTALL_SPEC,
   PRODUCT_NAME,
+  WDA_REPOSITORY_URL,
+  WDA_VERSION,
   stateRoot,
 } from './brand.js'
 
@@ -93,7 +95,7 @@ async function runSetup(scope?: 'all' | 'here'): Promise<void> {
     process.stderr.write('  Cloning WebDriverAgent...\n')
     mkdirSync(join(touchbridgeHome, 'wda-build'), { recursive: true })
     try {
-      await execAsync(`git clone --depth 1 https://github.com/appium/WebDriverAgent.git "${wdaPath}"`, { timeout: 120_000 })
+      await execAsync(`git clone --depth 1 --branch "${WDA_VERSION}" "${WDA_REPOSITORY_URL}" "${wdaPath}"`, { timeout: 120_000 })
     } catch (e) {
       process.stderr.write(`    Warning: WDA clone failed: ${(e as Error).message}\n`)
       process.stderr.write('    Physical device support requires WDA. You can clone manually.\n')

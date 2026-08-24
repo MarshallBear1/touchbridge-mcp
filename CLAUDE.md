@@ -14,7 +14,7 @@ MCP server for controlling iOS simulators and physical iPhones.
 ## Key Patterns
 
 - Use `scan_ui` before interacting — it returns interactive elements with tap coordinates
-- Use `get_screenshot` to visually verify the current screen state
+- Use `get_screenshot` to visually verify the current screen state; its pixels are unredacted, so delete the returned temporary file after use
 - Use `capture_design_snapshot` when the screenshot must be durable or handed to Figma, Slides, or another editing tool; pass the user's spoken instruction in `intent` and consume the returned `editor.json` for normalized layers
 - Use `describe_screen` for the full element tree (all types, not just interactive)
 - All coordinates are in device screen points (not pixels)

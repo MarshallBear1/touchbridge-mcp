@@ -30,6 +30,7 @@
     "dist",
     "docs",
     "assets",
+    "CHANGELOG.md",
     "NOTICE.md",
     "src/idb/ax-scan/ax-scan.m",
     "src/idb/ax-scan/Makefile"
@@ -40,6 +41,8 @@
   "scripts": {
     "build": "tsc",
     "benchmark:gesture-visualization": "node scripts/benchmark-gesture-visualization.mjs",
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "smoke:physical": "npm run build && node scripts/smoke-physical-device.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
